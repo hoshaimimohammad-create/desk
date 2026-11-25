@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <meta name="robots" content="noindex, nofollow">
+  <title>SMeTS scans</title>
+  <style>
+    :root { color-scheme: light; font: 1rem/1.5 system-ui, sans-serif; background: #f3f7f4; color: #1a2925 }
+    body { margin: 0; border-top: .35rem solid #23624f }
+    main { box-sizing: border-box; max-width: 48rem; margin: auto; padding: clamp(1rem, 4vw, 2rem); overflow-wrap: anywhere }
+    h1, h2, p { margin: 0 }
+    h1 { font-size: clamp(1.45rem, 4vw, 2rem) }
+    h2 { font-size: 1.1rem }
+    #monitor { color: #415b52; margin: .25rem 0 }
+    #notice, #total, #complete { margin-top: 1rem }
+    .controls { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem }
+    label { display: grid; gap: .2rem; font-size: .9rem; color: #415b52; flex: 1 1 10rem }
+    select { font: inherit; color: #1a2925; background: #fff; border: 1px solid #608276; border-radius: .5rem; min-height: 44px; padding: .3rem .5rem }
+    :focus-visible { outline: 3px solid #23755a; outline-offset: 3px }
+    section.day { margin-top: .9rem; padding: .8rem 1rem; background: #fff; border: 1px solid #d7e4de; border-radius: .75rem }
+    table { width: 100%; border-collapse: collapse; margin-top: .4rem }
+    th, td { text-align: start; padding: .4rem .3rem; border-top: 1px solid #e3ece8; vertical-align: top }
+    th { font-size: .85rem; color: #415b52; border-top: 0 }
+    td.s { width: 6.5rem; white-space: nowrap }
+    .ok { color: #1a6347; font-weight: 600 }
+    .bad { color: #9a3028; font-weight: 600 }
+    .wait, .na { color: #6b7d76 }
+    .ar { display: block; font-size: .85rem; color: #6b7d76 }
+  </style>
+  <script src="../supabase-config.js"></script>
+  <script type="module" src="am.js"></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>SMeTS scans</h1>
+      <p id="monitor" dir="auto"></p>
+    </header>
+    <div class="controls">
+      <label>Month <select id="month"></select></label>
+      <label>Week <select id="week"></select></label>
+    </div>
+    <p id="notice" role="status"></p>
+    <section id="schedule" hidden>
+      <p id="total" class="bad"></p>
+      <p id="complete" class="ok" hidden>No missing scans. All done.</p>
+      <div id="days"></div>
+    </section>
+  </main>
+</body>
+</html>
