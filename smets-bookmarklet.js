@@ -27,13 +27,14 @@ export function smetsResultText(result) {
 
 async function runBookmarklet(config, submit, format) {
   const { smets, site, project, publishableKey, token } = config;
+  const siteOrigin = new URL(site).origin;
   if (location.origin !== smets) {
     window.alert("Open your signed-in SMeTS tab before using this bookmark.");
     return;
   }
   // The only cross-origin write is to the separately configured Supabase host.
   if (![smets, site].every(origin => origin.startsWith("https://")) ||
-    !/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(project) || smets === project || smets === site) {
+    !/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(project) || smets === project || smets === siteOrigin) {
     window.alert("This bookmark is configured incorrectly. Ask Full Access staff to replace it.");
     return;
   }
@@ -74,7 +75,7 @@ async function runBookmarklet(config, submit, format) {
   async function handoff(payload) {
     if (!popup || popup.closed) throw new Error("Allow pop-ups for SMeTS and retry, or use the paste backup.");
     const channel = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => b.toString(16).padStart(2, "0")).join("");
-    const landing = new URL("/smets/", site);
+    const landing = new URL("smets/", site);
     landing.hash = new URLSearchParams({ source: smets, channel }).toString();
     await new Promise((resolve, reject) => {
       function finish(error) {
@@ -84,9 +85,9 @@ async function runBookmarklet(config, submit, format) {
         else resolve();
       }
       function receive(event) {
-        if (event.origin !== site || event.source !== popup || event.data?.type !== "td-smets-ready" ||
+        if (event.origin !== siteOrigin || event.source !== popup || event.data?.type !== "td-smets-ready" ||
           event.data.channel !== channel) return;
-        popup.postMessage({ type: "td-smets-submit", channel, token, payload }, site);
+        popup.postMessage({ type: "td-smets-submit", channel, token, payload }, siteOrigin);
         finish();
       }
       const timer = setTimeout(() => finish(new Error("The desk window could not receive the scan check. Use the paste backup.")), 15000);

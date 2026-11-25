@@ -69,7 +69,7 @@ export async function openSmetsButton(client, config, canCreate) {
       if (error || !/^[0-9a-f]{64}$/.test(token || "")) throw new Error("Could not create token");
       if (!dialog.open) return "";
       link.href = makeSmetsBookmarklet({
-        smets: origin, site: location.origin, project: new URL(config.url).origin,
+        smets: origin, site: new URL(".", location.href).href, project: new URL(config.url).origin,
         publishableKey: config.publishableKey, token
       });
       link.hidden = false;
