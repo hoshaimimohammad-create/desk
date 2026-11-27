@@ -910,6 +910,7 @@ function scnFill(x,d,c){const R=dayRows(d).map(r=>[r,retOf(d,r)]).filter(z=>z[1]
 function grnFill(x,d,c){const rows=grnRows(d,c),extra=Math.max(0,rows.length-9);x=grnGrow(x,extra);
   x=xSet(x,"J2",xdate(loadDay(d)));x=xSet(x,"E3",TD.SUPPLIER_NAME||"");x=xSet(x,"J3",TD.DELIVERY_ADDR||"");
   for(let n=0;n<9+extra;n++){const r=5+n,g=rows[n];if(n>=9)x=xSet(x,"A"+r,n+1);x=xSet(x,"B"+r,g?g.desc:"");x=xSet(x,"E"+r,g?g.q:"");x=xSet(x,"F"+r,g?g.unit:"");x=xSet(x,"G"+r,g?g.rec:"");x=xSet(x,"H"+r,g&&g.q-g.rec>0?r2(g.q-g.rec):"");x=xSet(x,"J"+r,g?g.dec:"");x=xSet(x,"K"+r,g?g.rem:"")}
+  if(TD.GRN_LOGISTICS_NAME)x=xSet(x,"F"+(16+extra),TD.GRN_LOGISTICS_NAME);
   x=xSet(x,"H"+(14+extra),rows.every(g=>g.ok)?"Yes / نعم":"No / لا");return x}
 const poName=(d,kind)=>(kind==="tr"?"Transportation_PO_":"Snack_PO_")+d+".xlsx";
 async function poDownload(d,kind){
