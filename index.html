@@ -235,16 +235,22 @@ function driverOf(id,d){const s=S.schools[id],b=s&&s.driver&&S.drivers[s.driver]
 function driverName(did){return did==="_none"?"No driver":(S.drivers[did]?.en||S.drivers[did]?.name||did)}
 const seqOf=id=>S.schools[id]?.seq??99,etaTag=id=>{const e=S.schools[id]?.eta;return e?`<span class="tag eta" dir="ltr">🕒 ${esc(e)}</span>`:""};
 function dayRows(d){return (S.days[d]?.rows||[]).filter(r=>S.schools[r.id]&&!rec(d,r.id).skip)}
+/* PO quantity = the order. When the tracker shows only what the school received, the waybill keeps "sent" (the order total);
+   the PO uses it (items scaled in proportion) and the GRN/SCN deduct the return. */
+function poR(d,r){const s=Math.round(+rec(d,r.id).sent||0),tot=(r.am||0)+(r.pm||0);if(!s||!tot||s===tot)return r;
+  const it={};Object.entries(r.it||{}).forEach(([k,v])=>it[k]=Math.round(v*s/tot));const am=Math.round((r.am||0)*s/tot);return {...r,am,pm:s-am,it,sentFix:tot}}
+function poRows(d){return dayRows(d).map(r=>poR(d,r))}
 function skipRows(d){return (S.days[d]?.rows||[]).filter(r=>S.schools[r.id]&&rec(d,r.id).skip)}
 /* Snacks that went out but came back (whole school = cancel, part = ret). Items are split in proportion. */
 function retOf(d,r){const x=rec(d,r.id),tot=(r.am||0)+(r.pm||0),n=x.cancel?tot:Math.min(tot,Math.max(0,Math.round(+x.ret||0)));if(!n)return null;
   const it={};Object.entries(r.it||{}).forEach(([k,v])=>{const q=n===tot?v:Math.round(v*n/tot);if(q)it[k]=q});
   return {n,tot,it,why:x.cancel?(x.cancelNote||"Not received"):(x.retNote||"Returned")}}
-function retHTML(d,r,x){const k=wbKey(d,r.id),n=Math.round(+x.ret||0),tot=(r.am||0)+(r.pm||0);
-  const line=n?`<div class="sub" style="color:var(--bad);font-weight:700">↩ Returned ${n} of ${tot} snacks${x.retNote?": "+esc(x.retNote):""}</div>`:"";
+function retHTML(d,r,x){const k=wbKey(d,r.id),n=Math.round(+x.ret||0),trk=(r.am||0)+(r.pm||0),sent=Math.round(+x.sent||0),tot=sent||trk;
+  const line=(n?`<div class="sub" style="color:var(--bad);font-weight:700">↩ Returned ${n} of ${tot} snacks${x.retNote?": "+esc(x.retNote):""}</div>`:"")+(sent&&sent!==trk?`<div class="sub">📦 PO uses the order: ${sent} sent (tracker shows ${trk} received)</div>`:"");
   if(!canEditTab("wb"))return line;
   if(!(S.retOpen&&S.retOpen.has(k)))return line+`<div class="pills"><button class="chip" type="button" data-retopen>↩ Return / not delivered</button></div>`;
   return line+`<div class="card" style="margin:6px 0;padding:8px"><div class="bar"><label>Snacks returned <input type="number" min="0" max="${tot}" step="1" inputmode="numeric" data-rf="ret" value="${n||""}" style="width:6em"></label> <small>of ${tot}</small></div>
+  <div class="bar"><label>Sent in the order <input type="number" min="0" step="1" inputmode="numeric" data-rf="sent" value="${sent||""}" placeholder="${trk}" style="width:6em"></label> <small>fill only if the tracker shows what was received (tracker: ${trk})</small></div>
   <input class="note-in" data-rf="retNote" value="${esc(x.retNote||"")}" placeholder="What happened (e.g. received 150 only)">
   <div class="bar"><button class="chip" type="button" data-retsave>Save return</button><button class="chip" type="button" data-skip>🚫 Not delivered at all (remove from PO)</button><button class="chip" type="button" data-retclose>Close</button></div></div>`}
 function sortedDays(){return Object.keys(S.days).sort()}
@@ -691,7 +697,7 @@ const TRANS_PRICE=Number(TD.TRANS_PRICE)||0,TVA=0.11,DISC=Number(TD.DISC)||0,DPC
 const r2=x=>Math.round(x*100)/100;
 function poCalc(d){
   const tot={};let parcels=0;
-  dayRows(d).forEach(r=>{parcels+=(r.am||0)+(r.pm||0);Object.entries(r.it||{}).forEach(([k,v])=>tot[k]=(tot[k]||0)+v)});
+  poRows(d).forEach(r=>{parcels+=(r.am||0)+(r.pm||0);Object.entries(r.it||{}).forEach(([k,v])=>tot[k]=(tot[k]||0)+v)});
   const kg=Object.assign({},PPK0,S.po.ppk||{}),miss=[];let fvkg=0,fvOk=true;
   const lines=PO_LINES.map(([code,name,u,price])=>{let q=0,note="";
     if(u==="kg"){const pcs=tot[code]||0;if(pcs){if(kg[code]>0){q=r2(pcs/kg[code]);fvkg+=q;note=pcs+" pcs ÷ "+kg[code]+" pcs/kg"}else{fvOk=false;miss.push(INAME[code]||code);note=pcs+" pcs · pieces per kg missing"}}}
@@ -756,7 +762,7 @@ function renderPOAny(kind){const tr=kind==="tr";
   ${poFormHTML(c,kind)}
   ${tr?"":`<details class="card"><summary><small>كيف انحسبت الكميات</small></summary><small dir="ltr">${c.lines.filter(l=>l.note).map(l=>esc(l.name)+": "+esc(l.note)).join("<br>")||"—"}</small></details>`}`}
 function renderPO(){return renderPOAny("po")}
-function poRetBox(d){const kg=Object.assign({},PPK0,S.po.ppk||{}),R=dayRows(d).map(r=>[r,retOf(d,r)]).filter(x=>x[1]),sk=skipRows(d);
+function poRetBox(d){const kg=Object.assign({},PPK0,S.po.ppk||{}),R=poRows(d).map(r=>[r,retOf(d,r)]).filter(x=>x[1]),sk=skipRows(d);
   if(!R.length&&!sk.length)return "";
   const ks=[...new Set(R.flatMap(([,o])=>Object.keys(o.it)))],tot={},nm=id=>S.schools[id].en||S.schools[id].name;
   const kgT=(k,v)=>{const l=PO_LINES.find(l=>l[0]===k);return l&&l[2]==="kg"&&kg[k]>0?` <small>(${r2(v/kg[k])} kg)</small>`:""};
@@ -791,7 +797,7 @@ function pomBlock(title,c,main){const $m=x=>"$"+money(x),f=n=>Number(n||0).toLoc
 /* Everything charged in the Snack PO for a returned snack comes back off: the goods, the F&V cleaning and sanitization (per kg)
    and the per-parcel services (wrapping, printing, bag, packaging). One entry per school, day and PO line. */
 function pomRets(days){const kg=Object.assign({},PPK0,S.po.ppk||{}),out=[];
-  days.forEach(d=>{let has=null;dayRows(d).forEach(r=>{const o=retOf(d,r);if(!o)return;has=has||poCalc(d).lines;let fv=0;
+  days.forEach(d=>{let has=null;poRows(d).forEach(r=>{const o=retOf(d,r);if(!o)return;has=has||poCalc(d).lines;let fv=0;
     const add=(i,pcs,q)=>{const price=PO_LINES[i][3],cost=q*price,tva=i>=9?cost*TVA:0;
       out.push({d,school:S.schools[r.id]?.en||S.schools[r.id]?.name||r.id,item:PO_LINES[i][1],unit:POF.unit[i],pcs,q,price,cost,tva,after:cost+tva,why:o.why,svc:i>=14})};
     Object.entries(o.it).forEach(([k,pcs])=>{const i=PO_LINES.findIndex(l=>l[0]===k);if(i<0||i>=14||!pcs)return;const kgU=PO_LINES[i][2]==="kg",q=kgU?r2(pcs/(kg[k]||1)):pcs;if(kgU)fv+=q;add(i,pcs,q)});
@@ -799,7 +805,7 @@ function pomRets(days){const kg=Object.assign({},PPK0,S.po.ppk||{}),out=[];
   return out}
 /* Returns are deducted twice: goods in the GRN, and transportation in the SCN (no transport is paid for snacks that did not arrive). */
 function retCalc(days){const G=pomRets(days),T=[];
-  days.forEach(d=>dayRows(d).forEach(r=>{const o=retOf(d,r);if(!o)return;const cost=o.n*TRANS_PRICE;T.push({d,school:S.schools[r.id]?.en||S.schools[r.id]?.name||r.id,n:o.n,cost,tva:cost*TVA,after:cost*(1+TVA),why:o.why})}));
+  days.forEach(d=>poRows(d).forEach(r=>{const o=retOf(d,r);if(!o)return;const cost=o.n*TRANS_PRICE;T.push({d,school:S.schools[r.id]?.en||S.schools[r.id]?.name||r.id,n:o.n,cost,tva:cost*TVA,after:cost*(1+TVA),why:o.why})}));
   const gAfter=G.reduce((a,x)=>a+x.after,0),gDisc=gAfter*DISC,tAfter=T.reduce((a,x)=>a+x.after,0);
   return {G,T,gAfter,gDisc,gNet:gAfter-gDisc,tAfter,n:T.reduce((a,x)=>a+x.n,0),total:gAfter-gDisc+tAfter}}
 function pomRetBlock(days){const R=pomRets(days),$m=x=>"$"+money(x),f=n=>Number(n||0).toLocaleString("en-US",{maximumFractionDigits:2});
@@ -902,7 +908,7 @@ function grnGrow(x,extra){if(extra<=0)return x;
   x=x.replace(/sqref="([^"]+)"/g,(m,r)=>`sqref="${sh(r)}"`).replace(/<formula1>([^<]+)<\/formula1>/g,(m,f)=>`<formula1>${shAbs(f)}</formula1>`);
   x=x.replace(/<dimension ref="A1:([A-Z]+)(\d+)"\/>/,(m,c,n)=>`<dimension ref="A1:${c}${+n+extra}"/>`);
   return x}
-function scnFill(x,d,c){const R=dayRows(d).map(r=>[r,retOf(d,r)]).filter(z=>z[1]),n=R.reduce((a,[,o])=>a+o.n,0),nm=id=>S.schools[id]?.en||S.schools[id]?.name||id,cost=n*TRANS_PRICE;
+function scnFill(x,d,c){const R=poRows(d).map(r=>[r,retOf(d,r)]).filter(z=>z[1]),n=R.reduce((a,[,o])=>a+o.n,0),nm=id=>S.schools[id]?.en||S.schools[id]?.name||id,cost=n*TRANS_PRICE;
   x=xSet(x,"H2",xdate(d));x=xSet(x,"F5",fdate(d));x=xSet(x,"H5","Accepted / مقبول");
   x=xSet(x,"I5",n?`Transportation PO: ${c.parcels} snacks. Delivered: ${c.parcels-n}. Not delivered (not to be charged): ${n}.`:`Delivered: ${c.parcels} snacks to ${dayRows(d).length} schools.`);
   x=xSet(x,"A7",n?`Deduct transportation for ${n} snacks not delivered: ${n} × ${TRANS_PRICE} = $${money(cost)} + TVA 11% $${money(cost*TVA)} = $${money(cost*(1+TVA))}. ${R.map(([r,o])=>nm(r.id)+": "+o.n+" ("+o.why+")").join("; ")}. See Issues ${d.slice(8)}/${d.slice(5,7)}.`:"");
@@ -1489,12 +1495,13 @@ document.addEventListener("change",e=>{
 document.addEventListener("click",async e=>{
   {const t=e.target;
   const ro=t.closest("[data-retopen],[data-retclose]");if(ro){const row=ro.closest(".row"),k=wbKey(row.dataset.d,row.dataset.id);S.retOpen=S.retOpen||new Set();if(ro.hasAttribute("data-retopen"))S.retOpen.add(k);else S.retOpen.delete(k);render();return}
-  const rs=t.closest("[data-retsave],[data-skip]");if(rs){const row=rs.closest(".row"),d=row.dataset.d,id=row.dataset.id,r=rowOf(d,id),tot=(r.am||0)+(r.pm||0);
+  const rs=t.closest("[data-retsave],[data-skip]");if(rs){const row=rs.closest(".row"),d=row.dataset.d,id=row.dataset.id,r=rowOf(d,id),trk=(r.am||0)+(r.pm||0),sf=row.querySelector('[data-rf="sent"]'),sent=Number(sf&&sf.value||0),tot=sent||trk;
     const n=Number(row.querySelector('[data-rf="ret"]').value||0),note=row.querySelector('[data-rf="retNote"]').value.trim().slice(0,500);
     if(rs.hasAttribute("data-skip")){if(!note){toast("Write what happened first");return}S.retOpen.delete(wbKey(d,id));if(await saveWB(d,id,{skip:true,skipNote:note}))toast("Moved to Not delivered");return}
+    if(!Number.isInteger(sent)||sent<0||(sent&&sent<trk)){toast("Sent must be empty or at least "+trk);return}
     if(!Number.isInteger(n)||n<0||n>tot){toast("Returned must be a whole number from 0 to "+tot);return}
     if(n&&!note){toast("Write what happened first");return}
-    S.retOpen.delete(wbKey(d,id));if(await saveWB(d,id,{ret:n,retNote:n?note:""}))toast(n?"Return saved":"Return removed");return}
+    S.retOpen.delete(wbKey(d,id));if(await saveWB(d,id,{ret:n,retNote:n?note:"",sent:sent===trk?0:sent}))toast(n?"Return saved":"Return removed");return}
   const us=t.closest("[data-unskip]");if(us){const [d,id]=us.dataset.unskip.split("|");if(await saveWB(d,id,{skip:false,skipNote:""}))toast("Back on the day");return}}
   if(e.target.id==="smartScan"&&S.smartScanner){
     S.smartScanner.open(S.day);
