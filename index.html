@@ -748,6 +748,7 @@ function renderPOAny(kind){const tr=kind==="tr";
   return `${tr?"":`<details class="card po-set"><summary><b>⚙️ كم حبة بالكيلو</b> <small>(الكيلو = عدد الحبات ÷ حبات بالكيلو)</small></summary>
   <div class="kg-grid">${FV.map(k=>`<label>${INAME[k]}<input type="number" step="0.001" min="0" inputmode="decimal" data-kg="${k}" value="${esc(kg[k]??"")}" placeholder="pcs/kg"></label>`).join("")}</div></details>`}
   ${navHTML(days)}
+  <div class="bar"><button class="btn" type="button" data-pomonth="${mon}" data-kind="${kind}">⬇ Whole month · ${esc(monName(mon))} (${tr?"Transportation":"Snack"} PO, ZIP)</button></div>
   <section class="group"><div class="ghead"><h3>📁 ${esc(monName(mon))} › Week ${wn}</h3><span class="meta">${inWk.length} أيام · ملف لكل نهار</span></div>
   ${inWk.map(d=>{const x=poCalc(d);return `<div class="row po-day${d===S.day?" sel":""}"><div class="nm"><b>${esc(dayName(d))}</b><small dir="ltr" style="text-align:right">${x.parcels} parcels · $${money(tr?x.trTotal:x.total)}${!tr&&x.miss.length?` · <span class="warn-t">kg missing</span>`:""}</small></div><div class="pills"><button class="chip" data-day="${d}">شوف</button><button class="chip" data-podl="${d}" data-kind="${kind}">⬇ Excel</button></div></div>`}).join("")}</section>
   ${!tr&&c.miss.length?`<p class="warn-t">⚠ ناقص حبات بالكيلو لـ: ${esc(c.miss.join(", "))}</p>`:""}${!tr&&c.extra.length?`<p class="warn-t">⚠ أصناف مش موجودة بفورم الـPO: ${esc(c.extra.map(k=>INAME[k]||k).join(", "))}</p>`:""}
@@ -860,9 +861,28 @@ function grnFill(x,d,c){const rows=grnRows(d,c);
   x=xSet(x,"J2",xdate(loadDay(d)));x=xSet(x,"E3",TD.SUPPLIER_NAME||"");x=xSet(x,"J3",TD.DELIVERY_ADDR||"");
   for(let n=0;n<9;n++){const r=5+n,g=rows[n];x=xSet(x,"B"+r,g?g.desc:"");x=xSet(x,"E"+r,g?g.q:"");x=xSet(x,"F"+r,g?g.unit:"");x=xSet(x,"G"+r,g?g.rec:"");x=xSet(x,"J"+r,g?g.dec:"");x=xSet(x,"K"+r,g?g.rem:"")}
   x=xSet(x,"H14",rows.every(g=>g.ok)?"Yes / نعم":"No / لا");return x}
+const poName=(d,kind)=>(kind==="tr"?"Transportation_PO_":"Snack_PO_")+d+".xlsx";
 async function poDownload(d,kind){
   if(!S.downloads){toast("Download is not available here");return}
   try{await loadJs("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",()=>window.JSZip)}catch(e){toast("ما قدر يحمّل المكتبة");return}
+  const buf=await poBuild(d,kind);
+  try{await S.downloads.save({filename:poName(d,kind),data:buf});toast("نزل الملف")}catch(e){if(e.code!=="declined")toast("Not downloaded: "+(e.message||e.code))}
+}
+/* Whole month: one ZIP with every delivery day's file (up to today), in week folders like the page. */
+async function poMonthDownload(mon,kind){
+  if(!S.downloads){toast("Download is not available here");return}
+  try{await loadJs("https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js",()=>window.JSZip)}catch(e){toast("ما قدر يحمّل المكتبة");return}
+  const t=todayISO(),days=sortedDays().filter(d=>d>=PO_FROM&&d.slice(0,7)===mon&&d<=t&&dayRows(d).length);
+  if(!days.length){toast("No delivery days in this month yet");return}
+  const wks=[...new Set(sortedDays().filter(d=>d>=PO_FROM&&d.slice(0,7)===mon).map(wkStart))];
+  toast("Preparing "+days.length+" files…");
+  try{const out=new JSZip();
+    for(const d of days)out.file("Week "+(wks.indexOf(wkStart(d))+1)+"/"+poName(d,kind),await poBuild(d,kind));
+    const buf=await out.generateAsync({type:"uint8array",compression:"DEFLATE"});
+    await S.downloads.save({filename:(kind==="tr"?"Transportation_PO_":"Snack_PO_")+monName(mon).replace(/\s+/g,"_")+"_until_"+days[days.length-1]+".zip",data:buf});toast(days.length+" files downloaded")}
+  catch(e){if(e.code!=="declined")toast("Not downloaded: "+(e.message||e.code))}
+}
+async function poBuild(d,kind){
   const tr=kind==="tr",c=poCalc(d);
   const bin=Uint8Array.from(atob(PO_TPL),ch=>ch.charCodeAt(0));const zip=await JSZip.loadAsync(bin);
   const setC=(x,ref,v)=>{const re=new RegExp('<c r="'+ref+'"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)');const m=x.match(re);if(!m)throw new Error("cell "+ref);
@@ -885,8 +905,7 @@ async function poDownload(d,kind){
     .replace(/activeTab="\d+"/,'activeTab="'+(first-1)+'"').replace(/<calcPr([^>]*?)\/>/,(a,r)=>'<calcPr'+r.replace(/\s*fullCalcOnLoad="[^"]*"/,"")+' fullCalcOnLoad="1"/>');
   zip.file("xl/workbook.xml",wbx);
   for(let i=1;i<=4;i++){const p="xl/worksheets/sheet"+i+".xml";let x=await zip.file(p).async("string");x=x.replace(/(<sheetView[^>]*?)\s*tabSelected="1"/,"$1");if(i===first)x=x.replace(/<sheetView /,'<sheetView tabSelected="1" ');zip.file(p,x)}
-  const buf=await zip.generateAsync({type:"uint8array",compression:"DEFLATE"});
-  try{await S.downloads.save({filename:(tr?"Transportation_PO_":"Snack_PO_")+d+".xlsx",data:buf});toast("نزل الملف")}catch(e){if(e.code!=="declined")toast("Not downloaded: "+(e.message||e.code))}
+  return await zip.generateAsync({type:"uint8array",compression:"DEFLATE"});
 }
 function savePO(patch){Object.assign(S.po,patch);render();if(S.db)S.db.collection("settings").doc("po").set(S.po).then(()=>toast("Saved")).catch(()=>toast("Not saved"))}
 
@@ -1376,7 +1395,7 @@ function render(){
   if(S.pages) {
     for(const el of v.querySelectorAll(editControls))if(!canEditControl(el))el.disabled=true;
     if(!canReadTab("po")||!canReadTab("tr")){
-      for(const el of v.querySelectorAll("[data-podl]")){
+      for(const el of v.querySelectorAll("[data-podl],[data-pomonth]")){
         el.disabled=true;
         el.title="The shared workbook requires both PO pages";
       }
@@ -1441,6 +1460,7 @@ document.addEventListener("click",async e=>{
   const wkB=t.closest("[data-week]");if(wkB){const m=S.day.slice(0,7);S.day=pickIn(sortedDays().filter(d=>d.slice(0,7)===m&&wkStart(d)===wkB.dataset.week));render();return}
   if(t.id==="onlyMiss"){S.onlyMissing=!S.onlyMissing;render();return}
   if(t.id==="onlyAlg"){S.onlyAlg=!S.onlyAlg;render();return}
+  const pmo=t.closest("[data-pomonth]");if(pmo){if(!S.pages||(canReadTab("po")&&canReadTab("tr"))){pmo.disabled=true;await poMonthDownload(pmo.dataset.pomonth,pmo.dataset.kind||"po");pmo.disabled=false}return}
   const pdl=t.closest("[data-podl]");if(pdl){if(!S.pages||(canReadTab("po")&&canReadTab("tr")))poDownload(pdl.dataset.podl,pdl.dataset.kind||"po");return}
   if(t.id==="onlyErr"){S.onlyErr=!S.onlyErr;render();return}
   if(t.id==="allGot"){
