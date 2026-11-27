@@ -784,18 +784,37 @@ function pomBlock(title,c,main){const $m=x=>"$"+money(x),f=n=>Number(n||0).toLoc
   <tr><td colspan="6">Discount (${DPCT}%)</td><td dir="ltr">- ${$m(c.disc)}</td></tr>
   <tr style="background:var(--ok-soft)"><td colspan="6"><b>Total Snack PO</b></td><td dir="ltr"><b>${$m(c.total)}</b></td></tr>
   <tr><td colspan="2">Transportation PO</td><td dir="ltr">${f(c.parcels)}</td><td dir="ltr">${TRANS_PRICE}</td><td dir="ltr">${$m(c.tr)}</td><td dir="ltr">${$m(c.trTva)}</td><td dir="ltr"><b>${$m(c.trTotal)}</b></td></tr>
-  <tr style="background:var(--ok-soft)"><td colspan="6"><b>Total (Snack PO + Transportation)</b></td><td dir="ltr"><b>${$m(c.total+c.trTotal)}</b></td></tr></tbody></table></div></section>`}
+  <tr style="background:var(--ok-soft)"><td colspan="6"><b>Total (Snack PO + Transportation)</b></td><td dir="ltr"><b>${$m(c.total+c.trTotal)}</b></td></tr>
+  ${(rc=>rc.total?`<tr><td colspan="6">Less returns · goods and packing services not delivered (after TVA and the ${DPCT}% discount) · in the GRN</td><td dir="ltr">- ${$m(rc.gNet)}</td></tr>
+  <tr><td colspan="6">Less returns · transportation for ${f(rc.n)} snacks not delivered (after TVA) · in the SCN</td><td dir="ltr">- ${$m(rc.tAfter)}</td></tr>
+  <tr style="background:var(--ok-soft)"><td colspan="6"><b>Net to pay after returns</b></td><td dir="ltr"><b>${$m(c.total+c.trTotal-rc.total)}</b></td></tr>`:"")(retCalc(c.days))}</tbody></table></div></section>`}
+/* Everything charged in the Snack PO for a returned snack comes back off: the goods, the F&V cleaning and sanitization (per kg)
+   and the per-parcel services (wrapping, printing, bag, packaging). One entry per school, day and PO line. */
 function pomRets(days){const kg=Object.assign({},PPK0,S.po.ppk||{}),out=[];
-  days.forEach(d=>dayRows(d).forEach(r=>{const o=retOf(d,r);if(!o)return;
-    Object.entries(o.it).forEach(([k,pcs])=>{const i=PO_LINES.findIndex(l=>l[0]===k);if(i<0||i>=14||!pcs)return;const u=PO_LINES[i][2],price=PO_LINES[i][3],q=u==="kg"?r2(pcs/(kg[k]||1)):pcs,cost=q*price,tva=i>=9?cost*TVA:0;
-      out.push({d,school:S.schools[r.id]?.en||S.schools[r.id]?.name||r.id,item:PO_LINES[i][1],unit:POF.unit[i],pcs,q,price,cost,tva,after:cost+tva,why:o.why})})}));
+  days.forEach(d=>{let has=null;dayRows(d).forEach(r=>{const o=retOf(d,r);if(!o)return;has=has||poCalc(d).lines;let fv=0;
+    const add=(i,pcs,q)=>{const price=PO_LINES[i][3],cost=q*price,tva=i>=9?cost*TVA:0;
+      out.push({d,school:S.schools[r.id]?.en||S.schools[r.id]?.name||r.id,item:PO_LINES[i][1],unit:POF.unit[i],pcs,q,price,cost,tva,after:cost+tva,why:o.why,svc:i>=14})};
+    Object.entries(o.it).forEach(([k,pcs])=>{const i=PO_LINES.findIndex(l=>l[0]===k);if(i<0||i>=14||!pcs)return;const kgU=PO_LINES[i][2]==="kg",q=kgU?r2(pcs/(kg[k]||1)):pcs;if(kgU)fv+=q;add(i,pcs,q)});
+    PO_LINES.forEach(([,, u],i)=>{if(i<14||!has[i].q)return;const q=u==="kgfv"?r2(fv):u==="parcel"?o.n:0;if(q)add(i,u==="parcel"?o.n:"",q)})})});
   return out}
+/* Returns are deducted twice: goods in the GRN, and transportation in the SCN (no transport is paid for snacks that did not arrive). */
+function retCalc(days){const G=pomRets(days),T=[];
+  days.forEach(d=>dayRows(d).forEach(r=>{const o=retOf(d,r);if(!o)return;const cost=o.n*TRANS_PRICE;T.push({d,school:S.schools[r.id]?.en||S.schools[r.id]?.name||r.id,n:o.n,cost,tva:cost*TVA,after:cost*(1+TVA),why:o.why})}));
+  const gAfter=G.reduce((a,x)=>a+x.after,0),gDisc=gAfter*DISC,tAfter=T.reduce((a,x)=>a+x.after,0);
+  return {G,T,gAfter,gDisc,gNet:gAfter-gDisc,tAfter,n:T.reduce((a,x)=>a+x.n,0),total:gAfter-gDisc+tAfter}}
 function pomRetBlock(days){const R=pomRets(days),$m=x=>"$"+money(x),f=n=>Number(n||0).toLocaleString("en-US",{maximumFractionDigits:2});
-  if(!R.length)return "";const tot=R.reduce((a,x)=>a+x.after,0);
-  return `<section class="card" style="border:2px solid var(--bad,#c0392b)"><h3 style="margin:0 0 4px">Returns to supplier (not deducted from the day)</h3><p class="status-line" style="margin:0 0 8px">Goods ordered and charged in the PO but not delivered. Shown for follow-up of the supplier credit only.</p>
+  if(!R.length)return "";const tot=R.reduce((a,x)=>a+x.after,0),rc=retCalc(days);
+  return `<section class="card" style="border:2px solid var(--bad,#c0392b)"><h3 style="margin:0 0 4px">Returns (deducted in the GRN and the SCN)</h3><p class="status-line" style="margin:0 0 8px">Snacks that were in the PO but did not reach the school. The daily PO stays as sent. The goods are deducted in that day's GRN, and their transportation in that day's SCN.</p>
   <div style="overflow-x:auto"><table class="sumt" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left">Day</th><th style="text-align:left">School</th><th style="text-align:left">Item</th><th>Pieces</th><th>Quantity</th><th>Cost before TVA</th><th>Cost after TVA</th><th style="text-align:left">Reason</th></tr></thead><tbody>
   ${R.map(x=>`<tr><td>${esc(dayName(x.d))}</td><td>${esc(x.school)}</td><td>${esc(x.item)}</td><td dir="ltr">${f(x.pcs)}</td><td dir="ltr">${f(x.q)} ${esc(x.unit)}</td><td dir="ltr">${$m(x.cost)}</td><td dir="ltr"><b>${$m(x.after)}</b></td><td>${esc(x.why)}</td></tr>`).join("")}
-  <tr style="background:var(--wait-soft)"><td colspan="6"><b>Total returns (before the invoice discount)</b></td><td dir="ltr"><b>${$m(tot)}</b></td><td></td></tr></tbody></table></div></section>`}
+  <tr><td colspan="6">Goods and services returned, after TVA</td><td dir="ltr">${$m(tot)}</td><td></td></tr>
+  <tr><td colspan="6">Less the ${DPCT}% invoice discount</td><td dir="ltr">- ${$m(rc.gDisc)}</td><td></td></tr>
+  <tr style="background:var(--wait-soft)"><td colspan="6"><b>Goods and services to deduct (GRN)</b></td><td dir="ltr"><b>${$m(rc.gNet)}</b></td><td></td></tr></tbody></table></div>
+  <h4 style="margin:12px 0 4px">Transportation not delivered (SCN)</h4>
+  <div style="overflow-x:auto"><table class="sumt" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left">Day</th><th style="text-align:left">School</th><th>Snacks</th><th>Unit price</th><th>Cost before TVA</th><th>TVA 11%</th><th>Cost after TVA</th><th style="text-align:left">Reason</th></tr></thead><tbody>
+  ${rc.T.map(x=>`<tr><td>${esc(dayName(x.d))}</td><td>${esc(x.school)}</td><td dir="ltr">${f(x.n)}</td><td dir="ltr">${TRANS_PRICE}</td><td dir="ltr">${$m(x.cost)}</td><td dir="ltr">${$m(x.tva)}</td><td dir="ltr"><b>${$m(x.after)}</b></td><td>${esc(x.why)}</td></tr>`).join("")}
+  <tr style="background:var(--wait-soft)"><td colspan="2"><b>Transportation to deduct (SCN)</b></td><td dir="ltr"><b>${f(rc.n)}</b></td><td></td><td></td><td></td><td dir="ltr"><b>${$m(rc.tAfter)}</b></td><td></td></tr>
+  <tr style="background:var(--ok-soft)"><td colspan="6"><b>Total deducted (GRN + SCN)</b></td><td dir="ltr"><b>${$m(rc.total)}</b></td><td></td></tr></tbody></table></div></section>`}
 function renderPOM(){
   if(!S.ready.days)return `<div class="empty">Loading…</div>`;
   const mons=[...new Set(sortedDays().filter(d=>d>=PO_FROM).map(d=>d.slice(0,7)))];
@@ -808,9 +827,9 @@ function renderPOM(){
   ${all.miss.length?`<p class="warn-t">⚠ Pieces per kg missing for: ${esc(all.miss.join(", "))}</p>`:""}
   ${parts.map(([t,c],k)=>pomBlock(t,c,k===2)).join("")}
   ${pomRetBlock(all.days)}
-  <section class="card"><h3 style="margin:0 0 8px">Cost per day</h3><table class="sumt" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left">Day</th><th>Snacks</th><th>Snack PO</th><th>Transportation PO</th><th>Day total</th></tr></thead><tbody>
-  ${[[parts[0][0],parts[0][1]],[parts[1][0],parts[1][1]]].map(([t,c])=>c.per.map(x=>`<tr><td>${esc(dayName(x.d))}</td><td dir="ltr">${f(x.parcels)}</td><td dir="ltr">${$m(x.total)}</td><td dir="ltr">${$m(x.tr)}</td><td dir="ltr"><b>${$m(x.total+x.tr)}</b></td></tr>`).join("")+(c.days.length?`<tr style="background:var(--wait-soft)"><td><b>${esc(t)}</b></td><td dir="ltr"><b>${f(c.parcels)}</b></td><td dir="ltr"><b>${$m(c.total)}</b></td><td dir="ltr"><b>${$m(c.trTotal)}</b></td><td dir="ltr"><b>${$m(c.total+c.trTotal)}</b></td></tr>`:"")).join("")}
-  <tr style="background:var(--ok-soft)"><td><b>Whole month</b></td><td dir="ltr"><b>${f(all.parcels)}</b></td><td dir="ltr"><b>${$m(all.total)}</b></td><td dir="ltr"><b>${$m(all.trTotal)}</b></td><td dir="ltr"><b>${$m(all.total+all.trTotal)}</b></td></tr></tbody></table></section>`}
+  <section class="card"><h3 style="margin:0 0 8px">Cost per day</h3><table class="sumt" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left">Day</th><th>Snacks</th><th>Snack PO</th><th>Transportation PO</th><th>Day total</th><th>Returns</th><th>Net</th></tr></thead><tbody>
+  ${[[parts[0][0],parts[0][1]],[parts[1][0],parts[1][1]]].map(([t,c])=>c.per.map(x=>{const rt=retCalc([x.d]).total;return `<tr><td>${esc(dayName(x.d))}</td><td dir="ltr">${f(x.parcels)}</td><td dir="ltr">${$m(x.total)}</td><td dir="ltr">${$m(x.tr)}</td><td dir="ltr">${$m(x.total+x.tr)}</td><td dir="ltr">${rt?"- "+$m(rt):"-"}</td><td dir="ltr"><b>${$m(x.total+x.tr-rt)}</b></td></tr>`}).join("")+(c.days.length?(rt=>`<tr style="background:var(--wait-soft)"><td><b>${esc(t)}</b></td><td dir="ltr"><b>${f(c.parcels)}</b></td><td dir="ltr"><b>${$m(c.total)}</b></td><td dir="ltr"><b>${$m(c.trTotal)}</b></td><td dir="ltr"><b>${$m(c.total+c.trTotal)}</b></td><td dir="ltr"><b>${rt?"- "+$m(rt):"-"}</b></td><td dir="ltr"><b>${$m(c.total+c.trTotal-rt)}</b></td></tr>`)(retCalc(c.days).total):"")).join("")}
+  ${(rt=>`<tr style="background:var(--ok-soft)"><td><b>Whole month</b></td><td dir="ltr"><b>${f(all.parcels)}</b></td><td dir="ltr"><b>${$m(all.total)}</b></td><td dir="ltr"><b>${$m(all.trTotal)}</b></td><td dir="ltr"><b>${$m(all.total+all.trTotal)}</b></td><td dir="ltr"><b>${rt?"- "+$m(rt):"-"}</b></td><td dir="ltr"><b>${$m(all.total+all.trTotal-rt)}</b></td></tr>`)(retCalc(all.days).total)}</tbody></table></section>`}
 async function pomXls(){
   if(!window.ExcelJS){toast("Excel library did not load");return}if(!S.downloads){toast("Download is not available here");return}
   const m=S.pomMon,parts=pomParts(m).map(([t,a,b])=>[t,pomCalc(m,a,b)]),all=parts[2][1],wb=new ExcelJS.Workbook(),thin={style:"thin",color:{argb:"FFB0B8BE"}},bd={top:thin,left:thin,bottom:thin,right:thin},M='"$"#,##0.00',Q='#,##0.##';
@@ -826,16 +845,27 @@ async function pomXls(){
     r=ws.addRow(["Discount ("+DPCT+"%)","","","","","",-c.disc]);box(r);r.getCell(7).numFmt=M;
     r=ws.addRow(["Total Snack PO","","","","","",c.total]);box(r);bold(r);fill(r);r.getCell(7).numFmt=M;
     r=ws.addRow(["Transportation PO","snacks",c.parcels,TRANS_PRICE,c.tr,c.trTva,c.trTotal]);box(r);r.getCell(3).numFmt=Q;[5,6,7].forEach(i=>r.getCell(i).numFmt=M);
-    r=ws.addRow(["Total (Snack PO + Transportation)","","","","","",c.total+c.trTotal]);box(r);bold(r);fill(r);r.getCell(7).numFmt=M});
-  const wd=wb.addWorksheet("Per day");wd.columns=[{width:30},{width:12},{width:16},{width:20},{width:16}];hdr(wd.addRow(["Day","Snacks","Snack PO","Transportation PO","Day total"]));
-  parts.slice(0,2).forEach(([t,c])=>{c.per.forEach(x=>{const r=wd.addRow([dayName(x.d),x.parcels,x.total,x.tr,x.total+x.tr]);box(r);r.getCell(2).numFmt=Q;[3,4,5].forEach(i=>r.getCell(i).numFmt=M)});
-    if(c.days.length){const r=wd.addRow([t,c.parcels,c.total,c.trTotal,c.total+c.trTotal]);box(r);bold(r);fill(r,"FFE6EAED");r.getCell(2).numFmt=Q;[3,4,5].forEach(i=>r.getCell(i).numFmt=M)}});
-  const r=wd.addRow(["Whole month",all.parcels,all.total,all.trTotal,all.total+all.trTotal]);box(r);bold(r);fill(r);r.getCell(2).numFmt=Q;[3,4,5].forEach(i=>r.getCell(i).numFmt=M);
+    r=ws.addRow(["Total (Snack PO + Transportation)","","","","","",c.total+c.trTotal]);box(r);bold(r);fill(r);r.getCell(7).numFmt=M;
+    const rc=retCalc(c.days);if(rc.total){
+      r=ws.addRow(["Less returns: goods and packing services not delivered (after TVA and the "+DPCT+"% discount) - in the GRN","","","","","",-rc.gNet]);box(r);r.getCell(7).numFmt=M;
+      r=ws.addRow(["Less returns: transportation for "+rc.n+" snacks not delivered (after TVA) - in the SCN","","","","","",-rc.tAfter]);box(r);r.getCell(7).numFmt=M;
+      r=ws.addRow(["Net to pay after returns","","","","","",c.total+c.trTotal-rc.total]);box(r);bold(r);fill(r);r.getCell(7).numFmt=M}});
+  const wd=wb.addWorksheet("Per day");wd.columns=[{width:30},{width:12},{width:16},{width:20},{width:16},{width:14},{width:16}];hdr(wd.addRow(["Day","Snacks","Snack PO","Transportation PO","Day total","Returns","Net"]));
+  parts.slice(0,2).forEach(([t,c])=>{c.per.forEach(x=>{const rt=retCalc([x.d]).total,r=wd.addRow([dayName(x.d),x.parcels,x.total,x.tr,x.total+x.tr,rt?-rt:null,x.total+x.tr-rt]);box(r);r.getCell(2).numFmt=Q;[3,4,5,6,7].forEach(i=>r.getCell(i).numFmt=M)});
+    if(c.days.length){const rt=retCalc(c.days).total,r=wd.addRow([t,c.parcels,c.total,c.trTotal,c.total+c.trTotal,rt?-rt:null,c.total+c.trTotal-rt]);box(r);bold(r);fill(r,"FFE6EAED");r.getCell(2).numFmt=Q;[3,4,5,6,7].forEach(i=>r.getCell(i).numFmt=M)}});
+  const rtA=retCalc(all.days).total,r=wd.addRow(["Whole month",all.parcels,all.total,all.trTotal,all.total+all.trTotal,rtA?-rtA:null,all.total+all.trTotal-rtA]);box(r);bold(r);fill(r);r.getCell(2).numFmt=Q;[3,4,5,6,7].forEach(i=>r.getCell(i).numFmt=M);
   {const R=pomRets(all.days);if(R.length){const wr=wb.addWorksheet("Returns");wr.columns=[{width:16},{width:34},{width:30},{width:10},{width:14},{width:16},{width:16},{width:70}];
-    wr.addRow(["Returns to supplier - shown for follow-up only, NOT deducted from the day totals"]).font={bold:true};
+    wr.addRow(["Returns - goods deducted in the GRN, transportation deducted in the SCN (daily PO stays as sent)"]).font={bold:true};
     hdr(wr.addRow(["Day","School","Item","Pieces","Quantity","Cost before TVA","Cost after TVA","Reason"]));
     R.forEach(x=>{const r=wr.addRow([dayName(x.d),x.school,x.item,x.pcs,x.q+" "+x.unit,x.cost,x.after,x.why]);box(r);r.getCell(4).numFmt=Q;[6,7].forEach(i=>r.getCell(i).numFmt=M);r.getCell(8).alignment={wrapText:true,vertical:"top"}});
-    const r=wr.addRow(["Total","","","","",R.reduce((a,x)=>a+x.cost,0),R.reduce((a,x)=>a+x.after,0),""]);box(r);bold(r);fill(r);[6,7].forEach(i=>r.getCell(i).numFmt=M)}}
+    let r=wr.addRow(["Goods and services returned","","","","",R.reduce((a,x)=>a+x.cost,0),R.reduce((a,x)=>a+x.after,0),""]);box(r);bold(r);[6,7].forEach(i=>r.getCell(i).numFmt=M);
+    const rc=retCalc(all.days);
+    r=wr.addRow(["Less the "+DPCT+"% invoice discount","","","","","",-rc.gDisc,""]);box(r);r.getCell(7).numFmt=M;
+    r=wr.addRow(["Goods and services to deduct (GRN)","","","","","",rc.gNet,""]);box(r);bold(r);fill(r,"FFE6EAED");r.getCell(7).numFmt=M;
+    wr.addRow([]);hdr(wr.addRow(["Day","School","Transportation","Snacks","Unit price","Cost before TVA","Cost after TVA","Reason"]));
+    rc.T.forEach(x=>{const r=wr.addRow([dayName(x.d),x.school,"Transportation not delivered",x.n,TRANS_PRICE,x.cost,x.after,x.why]);box(r);r.getCell(4).numFmt=Q;[6,7].forEach(i=>r.getCell(i).numFmt=M);r.getCell(8).alignment={wrapText:true,vertical:"top"}});
+    r=wr.addRow(["Transportation to deduct (SCN)","","",rc.n,"","",rc.tAfter,""]);box(r);bold(r);fill(r,"FFE6EAED");r.getCell(4).numFmt=Q;r.getCell(7).numFmt=M;
+    r=wr.addRow(["Total deducted (GRN + SCN)","","","","","",rc.total,""]);box(r);bold(r);fill(r);r.getCell(7).numFmt=M}}
   const buf=await wb.xlsx.writeBuffer();
   try{await S.downloads.save({filename:"PO_Reconciliation_"+m+"_until_"+todayISO()+".xlsx",data:new Uint8Array(buf)});toast("Excel ready")}catch(e){if(e.code!=="declined")toast("Not downloaded: "+(e.message||e.code))}}
 
@@ -852,15 +882,35 @@ function xSet(x,ref,v){const col=ref.match(/[A-Z]+/)[0],row=ref.match(/\d+/)[0];
   const out=cells.map(c=>{const cc=c.match(/r="([A-Z]+)/)[1];if(!done&&colN(cc)>colN(col)){done=true;return ins+c}return c});if(!done)out.push(ins);
   return x.replace(rre,(a,b,_,e)=>b+out.join("")+e)}
 const GRN_RE={AP:/apple/i,BA:/banana/i,PE:/pear/i,CA:/carrot/i,CU:/cucumber/i,MI:/milk/i,PN:/peanut/i,MN:/raw nuts|mixed nuts|mix of raw/i,KK:/kaak|plain brioche/i,BC:/coco|raisin/i,BD:/dates? brioche|brioche[^,]*date/i,GP:/plum|janerik/i,PL:/plum/i,NE:/nectarine/i};
-function grnRows(d,c){const kg=Object.assign({},PPK0,S.po.ppk||{}),qc=S.qc.find(q=>q.date===d),sat=new Date(d+"T12:00:00").getDay()===6;
-  const ret={},why={};dayRows(d).forEach(r=>{const o=retOf(d,r);if(!o)return;Object.entries(o.it).forEach(([k,v])=>{ret[k]=(ret[k]||0)+v;(why[k]=why[k]||[]).push((S.schools[r.id]?.en||S.schools[r.id]?.name||r.id)+" "+v+" pcs")})});
-  return c.lines.map((l,i)=>({l,i})).filter(({l,i})=>i<14&&l.q).map(({l,i})=>{const k=l.code,rp=ret[k]||0,rq=rp?(l.u==="kg"?r2(rp/(kg[k]||1)):rp):0;
-    const it=qc?qcItems(qc).filter(t=>GRN_RE[k]&&GRN_RE[k].test(t.product||"")):[];const dec=it.length?[...new Set(it.map(t=>t.decision||qc.decision||""))].join(" / "):!qc?(sat?"No QC (Saturday)":"No QC report"):"Not in the QC report";
-    return {desc:PO_LINES[i][1],q:l.q,unit:POF.unit[i],rec:r2(l.q-rq),dec,ok:!/reject/i.test(dec),rem:rp?`Returned to supplier: ${rp} pcs${l.u==="kg"?" ("+rq+" kg)":""}, not delivered (${why[k].join(", ")}). See Issues ${d.slice(8)}/${d.slice(5,7)}.`:""}})}
-function grnFill(x,d,c){const rows=grnRows(d,c);
+function grnRows(d,c){const qc=S.qc.find(q=>q.date===d),sat=new Date(d+"T12:00:00").getDay()===6,iss=` See Issues ${d.slice(8)}/${d.slice(5,7)}.`;
+  const ret={},pcs={},why={};pomRets([d]).forEach(x=>{const i=PO_LINES.findIndex(l=>l[1]===x.item);ret[i]=r2((ret[i]||0)+x.q);if(x.pcs)pcs[i]=(pcs[i]||0)+x.pcs;(why[i]=why[i]||[]).push(x.school+" "+(x.pcs||x.q))});
+  return c.lines.map((l,i)=>({l,i})).filter(({l})=>l.q).map(({l,i})=>{const k=l.code,rq=ret[i]||0,svc=i>=14;
+    let dec="Completed";if(!svc){const it=qc?qcItems(qc).filter(t=>GRN_RE[k]&&GRN_RE[k].test(t.product||"")):[];dec=it.length?[...new Set(it.map(t=>t.decision||qc.decision||""))].join(" / "):!qc?(sat?"No QC (Saturday)":"No QC report"):"Not in the QC report"}
+    const rem=!rq?"":svc?`Not delivered: ${rq} ${l.u==="kgfv"?"kg of F&V":"parcels"}, not to be charged (${why[i].join(", ")}).${iss}`
+      :`Returned to supplier: ${pcs[i]||rq} pcs${l.u==="kg"?" ("+rq+" kg)":""}, not delivered (${why[i].join(" pcs, ")} pcs).${iss}`;
+    return {desc:PO_LINES[i][1],q:l.q,unit:POF.unit[i],rec:r2(l.q-rq),dec,ok:!/reject/i.test(dec),rem}})}
+/* The GRN form has 9 item rows (5-13). When a day has more lines, copy row 13 and move everything below it down. */
+function grnGrow(x,extra){if(extra<=0)return x;
+  const sh=ref=>ref.replace(/([A-Z]+)(\d+)/g,(m,c,n)=>c+(+n>=14?+n+extra:n)),shAbs=ref=>ref.replace(/\$([A-Z]+)\$(\d+)/g,(m,c,n)=>"$"+c+"$"+(+n>=14?+n+extra:n));
+  x=x.replace(/<row r="(\d+)"([^>]*)>([\s\S]*?)<\/row>/g,(m,n,at,body)=>+n<14?m:`<row r="${+n+extra}"${at}>${body.replace(/<c r="([A-Z]+)(\d+)"/g,(q,c,rn)=>`<c r="${c}${+rn+extra}"`)}</row>`);
+  const r13=x.match(/<row r="13"[^>]*>[\s\S]*?<\/row>/)[0];let add="";
+  for(let k=1;k<=extra;k++){const rn=13+k;add+=r13.replace('<row r="13"','<row r="'+rn+'"').replace(/<c r="([A-Z]+)13"/g,'<c r="$1'+rn+'"').replace(/<f>[\s\S]*?<\/f>/g,"").replace(/<v>[\s\S]*?<\/v>/g,"").replace(/ t="(str|s)"/g,"")}
+  x=x.replace(r13,r13+add);
+  x=x.replace(/<mergeCell ref="([^"]+)"\/>/g,(m,r)=>`<mergeCell ref="${sh(r)}"/>`);
+  let mc="";for(let k=1;k<=extra;k++)mc+=`<mergeCell ref="B${13+k}:D${13+k}"/>`;
+  x=x.replace(/<mergeCells count="(\d+)">/,(m,n)=>`<mergeCells count="${+n+extra}">${mc}`);
+  x=x.replace(/sqref="([^"]+)"/g,(m,r)=>`sqref="${sh(r)}"`).replace(/<formula1>([^<]+)<\/formula1>/g,(m,f)=>`<formula1>${shAbs(f)}</formula1>`);
+  x=x.replace(/<dimension ref="A1:([A-Z]+)(\d+)"\/>/,(m,c,n)=>`<dimension ref="A1:${c}${+n+extra}"/>`);
+  return x}
+function scnFill(x,d,c){const R=dayRows(d).map(r=>[r,retOf(d,r)]).filter(z=>z[1]),n=R.reduce((a,[,o])=>a+o.n,0),nm=id=>S.schools[id]?.en||S.schools[id]?.name||id,cost=n*TRANS_PRICE;
+  x=xSet(x,"H2",xdate(d));x=xSet(x,"F5",fdate(d));x=xSet(x,"H5","Accepted / مقبول");
+  x=xSet(x,"I5",n?`Transportation PO: ${c.parcels} snacks. Delivered: ${c.parcels-n}. Not delivered (not to be charged): ${n}.`:`Delivered: ${c.parcels} snacks to ${dayRows(d).length} schools.`);
+  x=xSet(x,"A7",n?`Deduct transportation for ${n} snacks not delivered: ${n} × ${TRANS_PRICE} = $${money(cost)} + TVA 11% $${money(cost*TVA)} = $${money(cost*(1+TVA))}. ${R.map(([r,o])=>nm(r.id)+": "+o.n+" ("+o.why+")").join("; ")}. See Issues ${d.slice(8)}/${d.slice(5,7)}.`:"");
+  return xSet(x,"G8","Yes / نعم")}
+function grnFill(x,d,c){const rows=grnRows(d,c),extra=Math.max(0,rows.length-9);x=grnGrow(x,extra);
   x=xSet(x,"J2",xdate(loadDay(d)));x=xSet(x,"E3",TD.SUPPLIER_NAME||"");x=xSet(x,"J3",TD.DELIVERY_ADDR||"");
-  for(let n=0;n<9;n++){const r=5+n,g=rows[n];x=xSet(x,"B"+r,g?g.desc:"");x=xSet(x,"E"+r,g?g.q:"");x=xSet(x,"F"+r,g?g.unit:"");x=xSet(x,"G"+r,g?g.rec:"");x=xSet(x,"J"+r,g?g.dec:"");x=xSet(x,"K"+r,g?g.rem:"")}
-  x=xSet(x,"H14",rows.every(g=>g.ok)?"Yes / نعم":"No / لا");return x}
+  for(let n=0;n<9+extra;n++){const r=5+n,g=rows[n];if(n>=9)x=xSet(x,"A"+r,n+1);x=xSet(x,"B"+r,g?g.desc:"");x=xSet(x,"E"+r,g?g.q:"");x=xSet(x,"F"+r,g?g.unit:"");x=xSet(x,"G"+r,g?g.rec:"");x=xSet(x,"H"+r,g&&g.q-g.rec>0?r2(g.q-g.rec):"");x=xSet(x,"J"+r,g?g.dec:"");x=xSet(x,"K"+r,g?g.rem:"")}
+  x=xSet(x,"H"+(14+extra),rows.every(g=>g.ok)?"Yes / نعم":"No / لا");return x}
 const poName=(d,kind)=>(kind==="tr"?"Transportation_PO_":"Snack_PO_")+d+".xlsx";
 async function poDownload(d,kind){
   if(!S.downloads){toast("Download is not available here");return}
@@ -898,9 +948,11 @@ async function poBuild(d,kind){
     zip.file("xl/worksheets/sheet2.xml",grnFill(await zip.file("xl/worksheets/sheet2.xml").async("string"),d,c))}
   else{let x=await zip.file("xl/worksheets/sheet3.xml").async("string");const h=c.parcels*TRANS_PRICE;
     x=setC(x,"H2",pd);x=setC(x,"C5",dd);x=setC(x,"D9",c.parcels||null);x=setC(x,"H9",h);x=setC(x,"H10",h);x=setC(x,"H11",h*0.11);x=setC(x,"H14",h*1.11);
-    zip.file("xl/worksheets/sheet3.xml",x)}
+    zip.file("xl/worksheets/sheet3.xml",x);
+    zip.file("xl/worksheets/sheet4.xml",scnFill(await zip.file("xl/worksheets/sheet4.xml").async("string"),d,c))}
   const show=tr?["Transportation PO","Transportation SCN"]:["Snack Po","Snack GRN"],first=tr?3:1;
   let wbx=await zip.file("xl/workbook.xml").async("string");
+  if(!tr){const extra=Math.max(0,grnRows(d,c).length-9);if(extra)wbx=wbx.replace(/('Snack GRN'!\$A\$1:\$K\$)(\d+)/,(m,a,n)=>a+(+n+extra))}
   wbx=wbx.replace(/<sheet name="([^"]+)"([^>]*?)\/>/g,(a,n,r)=>`<sheet name="${n}"${r.replace(/\s*state="[^"]*"/,"")}${show.includes(n)?"":' state="hidden"'}/>`)
     .replace(/activeTab="\d+"/,'activeTab="'+(first-1)+'"').replace(/<calcPr([^>]*?)\/>/,(a,r)=>'<calcPr'+r.replace(/\s*fullCalcOnLoad="[^"]*"/,"")+' fullCalcOnLoad="1"/>');
   zip.file("xl/workbook.xml",wbx);
@@ -1191,10 +1243,10 @@ function repData(m,pi){
     rows:ks.map(k=>[INAME[k]||k,it[k]-(ai[k]||0),ai[k]||"",it[k],FV.includes(k)&&kg[k]>0?r2(it[k]/kg[k]):"",FV.includes(k)&&kg[k]>0?kg[k]:""])});
   // PO
   const po=[],parts=pi===2?[0,1,2]:[pi];
-  parts.forEach(i=>{const [pt,pa,pb]=repParts(m)[i];const c=pomCalc(m,pa,pb);po.push([pt,c.days.length,c.parcels,c.total,c.trTotal,c.total+c.trTotal])});
+  parts.forEach(i=>{const [pt,pa,pb]=repParts(m)[i];const c=pomCalc(m,pa,pb);const rt=retCalc(c.days).total;po.push([pt,c.days.length,c.parcels,c.total,c.trTotal,c.total+c.trTotal,rt?-rt:0,c.total+c.trTotal-rt])});
   const [,pa,pb]=repParts(m)[pi];const C=pomCalc(m,pa,pb);R.po=C;
   R.secs.push({k:"posum",title:"Financial summary (PO)",intro:"Reconciliation periods 1–15 and 16–end of month. Snack PO = items + packing services, TVA 11% on the lines that carry it (milk and fresh produce are VAT-free per the contract), less the "+DPCT+"% discount. Transportation = "+TRANS_PRICE+" $ per snack + TVA. Days from "+PO_FROM+" until today.",
-    cols:[["Period",28],["Days",8,1],["Snacks",12,1],["Snack PO $",17,2],["Transport PO $",17,2],["Total $",18,2]],rows:po.slice(0,pi===2?2:1),total:pi===2?po[2]:null});
+    cols:[["Period",24],["Days",7,1],["Snacks",11,1],["Snack PO $",14,2],["Transport PO $",14,2],["Total $",14,2],["Returns $",12,2],["Net to pay $",14,2]],rows:po.slice(0,pi===2?2:1),total:pi===2?po[2]:null});
   const pl=C.L.filter(l=>l.q).map(l=>[PO_LINES[l.i][1],String(POF.unit[l.i]).split(" /")[0].split("/")[0].trim(),l.q,+POF.price[l.i]||l.price,l.cost,l.tva||"",l.after]);
   R.secs.push({k:"poline",title:"PO detail by item · "+ptitle,cols:[["Item / service",30],["Unit",8],["Quantity",12,1],["Unit price $",10,3],["Before TVA $",14,2],["TVA 11% $",12,2],["After TVA $",14,2]],
     rows:pl.concat([["Subtotal","","","",C.sub,C.tva,C.sub+C.tva],["Discount "+DPCT+"%","","","","","",-C.disc],["Total Snack PO","","","","","",C.total],["Transportation PO","snack",C.parcels,TRANS_PRICE,C.tr,C.trTva,C.trTotal]]),
