@@ -100,7 +100,7 @@ select.st:disabled{opacity:1;cursor:default;-webkit-appearance:none;appearance:n
 #view.searching .wb-top{display:none}
 #view[data-tab="wb"] .nav-now{display:none}
 .nav-now{font-size:.9rem;margin:2px 0 6px;color:var(--ink)}.nav-now b{color:var(--accent)}.mchip{font-weight:700}
-small.items{display:block;color:var(--ink-2,inherit);opacity:.85}small.items.alg{color:var(--warn)}.alg-pills{grid-column:1/-1;margin-top:2px}
+small.items{display:block;color:var(--ink-2,inherit);opacity:.85}small.items.alg{color:var(--warn)}.alg-pills{grid-column:1/-1;margin-top:2px}.row>.sub,.row>.card{grid-column:1/-1}
 select.st{appearance:none;-webkit-appearance:none;border:0;border-radius:999px;padding:5px 12px;font:600 .82rem var(--f-body);cursor:pointer;min-width:98px;text-align:center}
 .s-wait{background:var(--wait-soft);color:var(--wait)} .s-company,.s-driver{background:var(--warn-soft);color:var(--warn)}
 .s-got,.s-done{background:var(--ok-soft);color:var(--ok)} .s-lost,.s-no{background:var(--bad-soft);color:var(--bad)}
@@ -239,6 +239,11 @@ function dayRows(d){return (S.days[d]?.rows||[]).filter(r=>S.schools[r.id]&&!rec
    the PO uses it (items scaled in proportion) and the GRN/SCN deduct the return. */
 function poR(d,r){const s=Math.round(+rec(d,r.id).sent||0),tot=(r.am||0)+(r.pm||0);if(!s||!tot||s===tot)return r;
   const it={};Object.entries(r.it||{}).forEach(([k,v])=>it[k]=Math.round(v*s/tot));const am=Math.round((r.am||0)*s/tot);return {...r,am,pm:s-am,it,sentFix:tot}}
+/* What the school actually received: the tracker row minus the return. When "sent" is kept, the tracker already shows what was received. */
+function rcvRow(d,r){const x=rec(d,r.id),trk=(r.am||0)+(r.pm||0),sent=Math.round(+x.sent||0);if(sent&&sent!==trk&&!x.cancel)return r;
+  const o=retOf(d,r);if(!o)return r;if(o.n>=o.tot)return {...r,am:0,pm:0,alg:0,it:{},ai:{}};
+  const f=v=>Math.round((v||0)*(o.tot-o.n)/o.tot),it={},ai={};Object.entries(r.it||{}).forEach(([k,v])=>{const q=v-(o.it[k]||0);if(q>0)it[k]=q});Object.entries(r.ai||{}).forEach(([k,v])=>{const q=f(v);if(q)ai[k]=q});
+  const am=f(r.am);return {...r,am,pm:trk-o.n-am,alg:f(r.alg),it,ai}}
 function poRows(d){return dayRows(d).map(r=>poR(d,r))}
 function skipRows(d){return (S.days[d]?.rows||[]).filter(r=>S.schools[r.id]&&rec(d,r.id).skip)}
 /* Snacks that went out but came back (whole school = cancel, part = ret). Items are split in proportion. */
@@ -299,7 +304,7 @@ function shLines(r,sn,qty){
   if(!r.sh)return `<small class="items">${qty}</small>`;
   return ["AM","PM"].filter(k=>r.sh[k]&&r.sh[k].n).map(k=>{const x=r.sh[k];const mi=(x.mi||[]).map(c=>INAME[c]||c).join(" + ");
     return `<small class="items"><span dir="ltr"><b>${k} ${esc(x.main??x.n)}</b> · ${esc(mi)}</span></small>`+(x.alg.length?`<small class="items alg"><span dir="ltr"><b>⚠ ${k} Allergy</b> · ${esc(x.alg.map(cmb).join(" · "))}</span>${sn?"":" (on the same waybill)"}</small>`:"")}).join("")}
-function daySumHTML(d,rows){
+function daySumHTML(d,rows0){const rows=rows0.map(r=>rcvRow(d,r));
   let am=0,pm=0,alg=0,nS=0,nN=0,tS=0,tN=0;const it={},ai={},nr=[];
   rows.forEach(r=>{const s=S.schools[r.id];am+=r.am||0;pm+=r.pm||0;alg+=r.alg||0;if(s.type==="snack"){nS++;tS+=(r.am||0)+(r.pm||0)}else{nN++;tN+=(r.am||0)+(r.pm||0)}if(rec(d,r.id).cancel)nr.push(s.en||s.name);
     Object.entries(r.it||{}).forEach(([k,v])=>it[k]=(it[k]||0)+v);Object.entries(r.ai||{}).forEach(([k,v])=>ai[k]=(ai[k]||0)+v)});
@@ -309,9 +314,16 @@ function daySumHTML(d,rows){
   <div class="stats"><div class="stat"><b>${f(tot)}</b><span>snacks (parcels)</span></div><div class="stat"><b>${f(am)}</b><span>AM</span></div><div class="stat"><b>${f(pm)}</b><span>PM</span></div><div class="stat"><b>${f(tot-alg)}</b><span>main</span></div><div class="stat warn"><b>${f(alg)}</b><span>allergy</span></div><div class="stat"><b>${rows.length}</b><span>schools · ${nS} snack · ${nN} nearby</span></div></div>
   <table class="sumt" style="width:100%;border-collapse:collapse;margin-top:10px"><thead><tr><th style="text-align:left">Item</th><th>Main</th><th>Allergy</th><th>Total</th></tr></thead><tbody>
   ${ks.map(k=>`<tr><td>${esc(INAME[k]||k)}</td><td>${f(it[k]-(ai[k]||0))}</td><td>${ai[k]?f(ai[k]):"-"}</td><td><b>${f(it[k])}</b></td></tr>`).join("")}</tbody></table><div style="display:flex;justify-content:flex-end;flex-wrap:wrap;gap:8px;margin-top:10px"><div style="border:2px solid var(--line);border-radius:10px;padding:8px 14px;font-size:1.05rem">Snack schools: <b>${f(tS)}</b></div><div style="border:2px solid var(--line);border-radius:10px;padding:8px 14px;font-size:1.05rem">Nearby: <b>${f(tN)}</b></div><div style="border:2px solid var(--ok);background:var(--ok-soft);border-radius:10px;padding:8px 14px;font-size:1.1rem"><b>Total snacks: ${f(tot)}</b></div></div>
-  ${nr.length?`<p class="status-line" style="color:var(--bad)">❌ Not received (still counted above): ${esc(nr.join(", "))}</p>`:""}
-  ${(rt=>rt.length?`<p class="status-line" style="color:var(--bad)">↩ Returned (still counted above, deducted in the GRN): ${esc(rt.join(", "))}</p>`:"")(rows.filter(r=>!rec(d,r.id).cancel&&retOf(d,r)).map(r=>(S.schools[r.id].en||S.schools[r.id].name)+" "+retOf(d,r).n))}
+  ${dayRetHTML(d,rows0,tot)}
   <p class="status-line">${S.days[d]?.src==="order"?"From the order file (the Waybill Tracker is not filled yet).":"From the Waybill Tracker."} <button class="chip" type="button" data-jump="top">↑ Top</button></p></section>`}
+/* Bottom of the Waybills day: every return of the day with details, so Sent (PO) - returned = received = Waybill Tracker total. */
+function dayRetHTML(d,rows0,rcv){const R=rows0.map(r=>poR(d,r)).map(r=>[r,retOf(d,r)]).filter(x=>x[1]);if(!R.length)return "";
+  const f=n=>Number(n||0).toLocaleString("en-US"),nm=id=>S.schools[id].en||S.schools[id].name,sent=rows0.reduce((a,r)=>{const p=poR(d,r);return a+(p.am||0)+(p.pm||0)},0),ret=R.reduce((a,[,o])=>a+o.n,0);
+  const ks=[...new Set(R.flatMap(([,o])=>Object.keys(o.it)))];
+  return `<div style="border:2px solid var(--bad,#c0392b);border-radius:10px;padding:10px 12px;margin-top:12px"><h4 style="margin:0 0 6px">↩ Returns this day</h4>
+  <div style="overflow-x:auto"><table class="sumt" style="width:100%;border-collapse:collapse"><thead><tr><th style="text-align:left">School</th><th>Sent (PO)</th><th>Received</th><th>Returned</th>${ks.map(k=>`<th>${esc(INAME[k]||k)} returned</th>`).join("")}<th style="text-align:left">Reason</th></tr></thead><tbody>
+  ${R.map(([r,o])=>`<tr><td>${esc(nm(r.id))}${rec(d,r.id).cancel?" <small>(not received)</small>":""}</td><td>${f(o.tot)}</td><td>${f(o.tot-o.n)}</td><td><b>${f(o.n)}</b></td>${ks.map(k=>`<td>${o.it[k]?f(o.it[k]):"-"}</td>`).join("")}<td style="text-align:left">${esc(o.why)}</td></tr>`).join("")}</tbody></table></div>
+  <p class="status-line" style="margin:8px 0 0"><b>Sent (PO) ${f(sent)} − returned ${f(ret)} = received ${f(sent-ret)}</b>${sent-ret===rcv?" ✅ = Total snacks above (Waybill Tracker)":` ⚠ Total snacks above is ${f(rcv)}`}. The PO keeps the sent quantity; the returns are deducted in the GRN and the SCN.</p></div>`}
 function attachmentButton(kind,id,label){
   return S.privateFiles?` <button type="button" class="chip" data-attachment-kind="${kind}" data-attachment-id="${esc(id)}">${label}</button>`:"";
 }
@@ -1234,13 +1246,13 @@ function repData(m,pi){
   // distribution
   const it={},ai={},sch=new Set(),daily=[];let T={am:0,pm:0,alg:0,tS:0,tN:0};const notRec=[];
   days.forEach(d=>{let am=0,pm=0,alg=0,nS=0,nN=0,tS=0,tN=0;const nr=[];
-    dayRows(d).forEach(r=>{const s=S.schools[r.id],q=(r.am||0)+(r.pm||0);sch.add(r.id);am+=r.am||0;pm+=r.pm||0;alg+=r.alg||0;if(s.type==="snack"){nS++;tS+=q}else{nN++;tN+=q}
-      const x=rec(d,r.id);if(x.cancel){nr.push(repNm(r.id));notRec.push([d,repNm(r.id),s.type==="snack"?"Snack":"Nearby",q,x.cancelNote||""])}
+    dayRows(d).map(r0=>rcvRow(d,r0)).forEach(r=>{const s=S.schools[r.id],q=(r.am||0)+(r.pm||0);sch.add(r.id);am+=r.am||0;pm+=r.pm||0;alg+=r.alg||0;if(s.type==="snack"){nS++;tS+=q}else{nN++;tN+=q}
+      const x=rec(d,r.id);if(x.cancel){nr.push(repNm(r.id));notRec.push([d,repNm(r.id),s.type==="snack"?"Snack":"Nearby",retOf(d,poR(d,r))?.tot||q,x.cancelNote||""])}
       Object.entries(r.it||{}).forEach(([k,v])=>it[k]=(it[k]||0)+v);Object.entries(r.ai||{}).forEach(([k,v])=>ai[k]=(ai[k]||0)+v)});
     T.am+=am;T.pm+=pm;T.alg+=alg;T.tS+=tS;T.tN+=tN;
     daily.push([repD(d),nS+nN,nS,nN,am,pm,am+pm-alg,alg,am+pm,S.days[d]?.src==="order"?"Order file (tracker not filled yet)":nr.length?"Not received: "+nr.join(", "):""])});
   const tot=T.am+T.pm;R.T=Object.assign(T,{tot,main:tot-T.alg,sch:sch.size,nS:[...sch].filter(id=>S.schools[id].type==="snack").length});R.T.nN=R.T.sch-R.T.nS;
-  R.secs.push({k:"daily",title:"Daily distribution",intro:"Snacks (parcels) delivered per delivery day, from the Waybill Tracker (or the order file when the tracker was not filled yet).",
+  R.secs.push({k:"daily",title:"Daily distribution",intro:"Snacks (parcels) received per delivery day, from the Waybill Tracker (or the order file when the tracker was not filled yet). Returns and schools that did not receive are already deducted.",
     cols:[["Date",13],["Schools",7,1],["Snack sch.",7,1],["Nearby sch.",7,1],["AM",8,1],["PM",8,1],["Main",9,1],["Allergy",8,1],["Total snacks",10,1],["Remarks",23]],
     rows:daily,total:["Total "+days.length+" days",R.T.sch+" schools","","",T.am,T.pm,tot-T.alg,T.alg,tot,""]});
   // items
