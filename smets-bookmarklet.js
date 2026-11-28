@@ -57,14 +57,20 @@ async function runBookmarklet(config, submit, format) {
       url.searchParams.set("page", String(page));
       url.searchParams.set("page_size", String(pageSize));
       if (orderId !== null) url.searchParams.set("order", orderId);
-      const response = await fetch(url, {
-        method: "GET", credentials: "same-origin", mode: "same-origin", redirect: "error",
-        referrerPolicy: "no-referrer", cache: "no-store", signal: AbortSignal.timeout(15000)
-      }).catch(() => null);
-      const data = response?.ok ? await response.json().catch(() => null) : null;
+      // SMeTS sometimes refuses a burst of reads: wait and try the same page again (3 tries).
+      let data = null, status = "no answer";
+      for (let attempt = 0; attempt < 3 && !data; attempt++) {
+        if (attempt) await new Promise(resolve => setTimeout(resolve, 2000 * attempt));
+        const response = await fetch(url, {
+          method: "GET", credentials: "same-origin", mode: "same-origin", redirect: "error",
+          referrerPolicy: "no-referrer", cache: "no-store", signal: AbortSignal.timeout(30000)
+        }).catch(() => null);
+        if (response) status = response.status;
+        data = response?.ok ? await response.json().catch(() => null) : null;
+      }
       if (!data || !Array.isArray(data.results) || data.results.length > pageSize ||
         (data.next !== null && (typeof data.next !== "string" || !data.next))) {
-        throw new Error("Could not read SMeTS. Check that you are signed in, then retry.");
+        throw new Error("Could not read SMeTS (" + (orderId === null ? "orders list" : "order " + orderId) + ", HTTP " + status + "). Check that you are signed in, then retry.");
       }
       for (const row of data.results) take(row);
       if (data.next === null) return;
@@ -116,9 +122,9 @@ async function runBookmarklet(config, submit, format) {
       orders.push({ id, day, items: [] });
       if (orders.length > 150) throw new Error("More than 150 recent orders. Use the paste backup.");
     });
-    // Four orders at a time: a month of orders reads in well under a minute.
+    // One order at a time, like the old 7-day button that worked: SMeTS refuses bursts of parallel reads.
     const queue = [...orders];
-    await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) { const order = queue.shift();
+    await Promise.all(Array.from({ length: 1 }, async () => { while (queue.length) { const order = queue.shift();
       await readPages("order_item", 200, order.id, item => {
         const cerd = String(item?.schoolRef ?? "").trim();
         if (!/^[A-Za-z0-9_-]{1,64}$/.test(cerd) || typeof item?.state !== "string" ||
