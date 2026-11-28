@@ -49,7 +49,7 @@ async function runBookmarklet(config, submit, format) {
     return `${parts.year}-${parts.month}-${parts.day}`;
   }
   const midnight = Date.parse(dateInBeirut(new Date()) + "T00:00:00Z");
-  for (let i = 0; i < 7; i++) recentDays.add(new Date(midnight - i * 86400000).toISOString().slice(0, 10));
+  for (let i = 0; i < 31; i++) recentDays.add(new Date(midnight - i * 86400000).toISOString().slice(0, 10));
 
   async function readPages(resource, pageSize, orderId, take) {
     for (let page = 1; page <= 100; page++) {
@@ -114,17 +114,19 @@ async function runBookmarklet(config, submit, format) {
       const id = String(order.id ?? "");
       if (!/^[A-Za-z0-9_-]{1,100}$/.test(id)) throw new Error("SMeTS returned an invalid order ID.");
       orders.push({ id, day, items: [] });
-      if (orders.length > 50) throw new Error("More than 50 recent orders. Use the paste backup.");
+      if (orders.length > 150) throw new Error("More than 150 recent orders. Use the paste backup.");
     });
-    for (const order of orders) {
+    // Four orders at a time: a month of orders reads in well under a minute.
+    const queue = [...orders];
+    await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) { const order = queue.shift();
       await readPages("order_item", 200, order.id, item => {
         const cerd = String(item?.schoolRef ?? "").trim();
         if (!/^[A-Za-z0-9_-]{1,64}$/.test(cerd) || typeof item?.state !== "string" ||
           !/^[A-Za-z0-9_ -]{1,64}$/.test(item.state)) throw new Error("SMeTS returned an invalid CERD or item state.");
         order.items.push({ cerd, state: item.state });
-        if (++itemCount > 5000) throw new Error("More than 5000 recent items. Use the paste backup.");
+        if (++itemCount > 15000) throw new Error("More than 15000 recent items. Use the paste backup.");
       });
-    }
+    } }));
     const payload = { orders };
     const result = await submit(project, publishableKey, token, payload);
     if (result === null) await handoff(payload);
